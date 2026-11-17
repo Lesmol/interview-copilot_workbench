@@ -8,7 +8,7 @@ make up                  # builds each service from GitHub and waits until healt
 make smoke
 ```
 
-Open http://localhost:8080 and sign in as `journalist` with `TEST_USER_PASSWORD` from your `.env`.
+Open http://localhost:8080 and sign in on the app's own page as `journalist` with `TEST_USER_PASSWORD` from your `.env`.
 
 To build from local sibling checkouts, copy `compose.override.example.yaml` to `compose.override.yaml`.
 
