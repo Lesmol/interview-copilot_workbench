@@ -12,9 +12,13 @@ Open http://localhost:8080 and sign in on the app's own page as `journalist` wit
 
 To build from local sibling checkouts, copy `compose.override.example.yaml` to `compose.override.yaml`.
 
+## Reset emails
+
+Password-reset emails go to Mailpit, a local mail catcher (nothing is delivered). Open http://localhost:8025 to read them.
+
 ## Keys
 
-Deepgram and Anthropic keys are needed for the live loop (milestones 2+); audio goes from the browser straight to Deepgram, so the browser needs internet access. `ASSEMBLYAI_API_KEY` is optional. Nothing secret is committed; `.env` is gitignored.
+Deepgram and Anthropic keys are needed for the live loop (milestones 2+); audio goes from the browser straight to Deepgram, so the browser needs internet access. Nothing secret is committed; `.env` is gitignored.
 
 ## Topology
 
