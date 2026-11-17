@@ -38,8 +38,12 @@ check "authenticated call reaches the backend end to end" \
 check "forged X-User-Id is ignored" \
   "curl -s -H 'Authorization: Bearer $TOKEN' -H 'X-User-Id: forged' $FRONTEND/api/v1/whoami | grep -q '\"userId\":\"$SUB\"'"
 
-check "stt-token returns a short-lived token and never the API key" \
-  "R=\$(curl -s -H 'Authorization: Bearer $TOKEN' '$FRONTEND/api/v1/stt-token?provider=deepgram'); echo \"\$R\" | grep -q '\"token\"' && ! echo \"\$R\" | grep -qF \"\${DEEPGRAM_API_KEY:-__none__}\""
+if [ -z "${DEEPGRAM_API_KEY:-}" ] || [ "${DEEPGRAM_API_KEY}" = CHANGE_ME ]; then
+  skip "stt-token never leaks the API key (no real DEEPGRAM_API_KEY set)"
+else
+  check "stt-token returns a short-lived token and never the API key" \
+    "R=\$(curl -s -H 'Authorization: Bearer $TOKEN' '$FRONTEND/api/v1/stt-token?provider=deepgram'); echo \"\$R\" | grep -q '\"token\"' && ! echo \"\$R\" | grep -qF \"\${DEEPGRAM_API_KEY:-__none__}\""
+fi
 
 # --- accounts: sign-up and password reset (no token needed) ---
 EMAIL="smoke-$RANDOM$RANDOM@example.test"; PW1="first-pass-$RANDOM$RANDOM"; PW2="second-pass-$RANDOM$RANDOM"
