@@ -1,0 +1,171 @@
+# Interview Co-Pilot workbench: LOCAL TESTING ONLY, not production.
+# Builds every service from GitHub (see compose.override.example.yaml for local checkouts).
+
+x-spring-health: &spring-health
+  test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /actuator/health/readiness HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q '\"UP\"' <&3"]
+  interval: 5s
+  timeout: 5s
+  retries: 30
+  start_period: 20s
+
+x-oidc: &oidc
+  OIDC_ISSUER_URI: http://localhost:${KEYCLOAK_PORT:-8081}/realms/interview-copilot
+  OIDC_JWKS_URI: http://keycloak:8080/realms/interview-copilot/protocol/openid-connect/certs
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: interview_copilot
+      POSTGRES_USER: interview_copilot
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U interview_copilot -d interview_copilot"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [data]
+
+  # Local AWS emulator (https://ministack.org), used for its S3 API. See docs/decisions.md.
+  s3:
+    image: ministackorg/ministack:latest
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/4566 && printf 'GET /_ministack/health HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q services <&3"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [data]
+
+  s3-init:
+    image: ministackorg/ministack:latest
+    depends_on:
+      s3: { condition: service_healthy }
+    environment:
+      AWS_ACCESS_KEY_ID: test      # dummy credentials for the local emulator
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_DEFAULT_REGION: us-east-1
+    entrypoint: ["aws", "--endpoint-url", "http://s3:4566", "s3", "mb", "s3://transcripts"]
+    restart: "no"
+    networks: [data]
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.8.2
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?set KEYCLOAK_ADMIN_PASSWORD in .env}
+      # Fixed public hostname: `iss` is identical for the browser and for services.
+      KC_HOSTNAME: http://localhost:${KEYCLOAK_PORT:-8081}
+      KC_HTTP_ENABLED: "true"
+      KC_HEALTH_ENABLED: "true"
+      BFF_CLIENT_SECRET: ${BFF_CLIENT_SECRET:?set BFF_CLIENT_SECRET in .env}
+      TEST_USER_PASSWORD: ${TEST_USER_PASSWORD:?set TEST_USER_PASSWORD in .env}
+      TEST_USER2_PASSWORD: ${TEST_USER_PASSWORD}
+      FRONTEND_PORT: ${FRONTEND_PORT:-8080}
+    volumes:
+      - ./keycloak/interview-copilot-realm.json:/opt/keycloak/data/import/interview-copilot-realm.json:ro
+    ports:
+      - "${KEYCLOAK_PORT:-8081}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /health/ready HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q '\"UP\"' <&3"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 30s
+    networks: [web, auth-edge, auth-bff, auth-internal, auth-backend]
+
+  backend:
+    build:
+      context: https://github.com/${GITHUB_OWNER:-Lesmol}/interview-copilot_backend.git#${BACKEND_REF:-main}
+    image: interview-copilot_backend:local
+    depends_on:
+      postgres: { condition: service_healthy }
+      s3-init: { condition: service_completed_successfully }
+      keycloak: { condition: service_healthy }
+    environment:
+      <<: *oidc
+      DATABASE_URL: jdbc:postgresql://postgres:5432/interview_copilot
+      DATABASE_USER: interview_copilot
+      DATABASE_PASSWORD: ${POSTGRES_PASSWORD}
+      S3_ENDPOINT: http://s3:4566
+      S3_ACCESS_KEY: test   # dummy credentials for the local emulator
+      S3_SECRET_KEY: test
+      S3_REGION: us-east-1
+      S3_BUCKET: transcripts
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY:-}
+      ASSEMBLYAI_API_KEY: ${ASSEMBLYAI_API_KEY:-}
+    healthcheck: *spring-health
+    networks: [internal-backend, data, auth-backend, egress]
+
+  internal-gateway:
+    build:
+      context: https://github.com/${GITHUB_OWNER:-Lesmol}/interview-copilot_internal-gateway.git#${INTERNAL_GATEWAY_REF:-main}
+    image: interview-copilot_internal-gateway:local
+    depends_on:
+      backend: { condition: service_healthy }
+    environment:
+      <<: *oidc
+      BACKEND_URL: http://backend:8080
+    healthcheck: *spring-health
+    networks: [bff-internal, internal-backend, auth-internal]
+
+  bff:
+    build:
+      context: https://github.com/${GITHUB_OWNER:-Lesmol}/interview-copilot_bff.git#${BFF_REF:-main}
+    image: interview-copilot_bff:local
+    depends_on:
+      internal-gateway: { condition: service_healthy }
+    environment:
+      INTERNAL_GATEWAY_URL: http://internal-gateway:8080
+      OIDC_TOKEN_URI: http://keycloak:8080/realms/interview-copilot/protocol/openid-connect/token
+      BFF_CLIENT_ID: interview-copilot-bff
+      BFF_CLIENT_SECRET: ${BFF_CLIENT_SECRET}
+    healthcheck: *spring-health
+    networks: [edge-bff, bff-internal, auth-bff]
+
+  edge-gateway:
+    build:
+      context: https://github.com/${GITHUB_OWNER:-Lesmol}/interview-copilot_edge-gateway.git#${EDGE_GATEWAY_REF:-main}
+    image: interview-copilot_edge-gateway:local
+    depends_on:
+      bff: { condition: service_healthy }
+    environment:
+      <<: *oidc
+      BFF_URL: http://bff:8080
+    healthcheck: *spring-health
+    networks: [web, edge-bff, auth-edge]
+
+  frontend:
+    build:
+      context: https://github.com/${GITHUB_OWNER:-Lesmol}/interview-copilot_frontend.git#${FRONTEND_REF:-main}
+    image: interview-copilot_frontend:local
+    depends_on:
+      edge-gateway: { condition: service_healthy }
+    environment:
+      EDGE_GATEWAY_URL: http://edge-gateway:8080
+      OIDC_AUTHORITY: http://localhost:${KEYCLOAK_PORT:-8081}/realms/interview-copilot
+      OIDC_CLIENT_ID: interview-copilot-spa
+    ports:
+      - "${FRONTEND_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [web]
+
+# Separate networks enforce the architecture: layers cannot be skipped.
+networks:
+  web: {}                    # frontend, edge-gateway, keycloak (browser needs it for sign-in)
+  edge-bff: { internal: true }        # edge-gateway <-> bff only
+  bff-internal: { internal: true }    # bff <-> internal-gateway only
+  internal-backend: { internal: true } # internal-gateway <-> backend only
+  data: { internal: true }            # backend, postgres, s3
+  # One network per service that talks to the IdP. A single shared `auth` network would let
+  # the services reach each other and bypass the gateways (see docs/decisions.md).
+  auth-edge: { internal: true }
+  auth-bff: { internal: true }
+  auth-internal: { internal: true }
+  auth-backend: { internal: true }
+  egress: {}                          # backend only: outbound calls to the LLM

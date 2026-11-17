@@ -1,0 +1,17 @@
+# Copy to compose.override.yaml (gitignored) to build from local sibling checkouts instead of GitHub.
+services:
+  backend:
+    build:
+      context: ../interview-copilot_backend
+  internal-gateway:
+    build:
+      context: ../interview-copilot_internal-gateway
+  bff:
+    build:
+      context: ../interview-copilot_bff
+  edge-gateway:
+    build:
+      context: ../interview-copilot_edge-gateway
+  frontend:
+    build:
+      context: ../interview-copilot_frontend

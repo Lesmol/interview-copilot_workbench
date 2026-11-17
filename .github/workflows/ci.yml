@@ -1,0 +1,23 @@
+name: ci
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: '0 5 * * 1'
+permissions:
+  contents: read
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Create throwaway .env (CI only, random values)
+        run: |
+          cp .env.example .env
+          for v in KEYCLOAK_ADMIN_PASSWORD BFF_CLIENT_SECRET TEST_USER_PASSWORD POSTGRES_PASSWORD; do
+            sed -i "s|^$v=.*|$v=$(openssl rand -hex 16)|" .env
+          done
+      - run: docker compose up --build -d --wait
+      - run: ./scripts/smoke.sh
+      - if: failure()
+        run: docker compose logs --no-color | tail -200
