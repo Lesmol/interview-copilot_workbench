@@ -37,6 +37,9 @@ check "authenticated call reaches the backend end to end" \
 check "forged X-User-Id is ignored" \
   "curl -s -H 'Authorization: Bearer $TOKEN' -H 'X-User-Id: forged' $FRONTEND/api/whoami | grep -q '\"userId\":\"$SUB\"'"
 
+check "stt-token returns a short-lived token and never the API key" \
+  "R=\$(curl -s -H 'Authorization: Bearer $TOKEN' '$FRONTEND/api/stt-token?provider=deepgram'); echo \"\$R\" | grep -q '\"token\"' && ! echo \"\$R\" | grep -qF \"\${DEEPGRAM_API_KEY:-__none__}\""
+
 skip "a user cannot read another user's session (needs sessions, milestone 6)"
 skip "SSE stream stays open through both gateways (needs the suggestion stream, milestone 4)"
 
