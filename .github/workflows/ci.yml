@@ -17,6 +17,8 @@ jobs:
           for v in KEYCLOAK_ADMIN_PASSWORD BFF_CLIENT_SECRET TEST_USER_PASSWORD POSTGRES_PASSWORD; do
             sed -i "s|^$v=.*|$v=$(openssl rand -hex 16)|" .env
           done
+          # No Anthropic key in CI: run the suggestion loop against the stand-in model.
+          printf 'COMPOSE_PROFILES=fake-llm\nANTHROPIC_BASE_URL=http://fake-llm:8080\n' >> .env
       - run: docker compose up --build -d --wait
       - run: ./scripts/smoke.sh
       - if: failure()
