@@ -18,7 +18,7 @@ Password-reset emails go to Mailpit, a local mail catcher (nothing is delivered)
 
 ## Keys
 
-Deepgram and Anthropic keys are needed for the live loop (milestones 2+); audio goes from the browser straight to Deepgram, so the browser needs internet access. Nothing secret is committed; `.env` is gitignored.
+Deepgram and Anthropic keys are needed for the live loop (milestones 2+); audio goes from the browser straight to Deepgram, so the browser needs internet access. Nothing secret is committed; `.env` is gitignored. No Anthropic key or credit? Set `COMPOSE_PROFILES=fake-llm` and `ANTHROPIC_BASE_URL=http://fake-llm:8080` in `.env` to use a stand-in model that checks the plumbing (not suggestion quality).
 
 ## Topology
 

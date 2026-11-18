@@ -67,8 +67,20 @@ check "the old password no longer works and the new one does" "[ \"\$(login_code
 check "the reset link works only once" "[ \"\$(api_post /api/v1/accounts/password-reset/confirm '{\"token\":\"$RESET_TOKEN\",\"newPassword\":\"$PW1\"}')\" = 400 ]"
 check "an unknown API version is not routed" "[ \"\$(curl -s -o /dev/null -w '%{http_code}' -H 'Authorization: Bearer $TOKEN' $FRONTEND/api/v2/whoami)\" = 404 ]"
 
-skip "a user cannot read another user's session (needs sessions, milestone 6)"
-skip "SSE stream stays open through both gateways (needs the suggestion stream, milestone 4)"
+# --- suggestions: scripted interview through the edge gateway (uses the stand-in model unless a real key is set) ---
+OTHER_TOKEN=""
+for _ in 1 2 3; do
+  OTHER_TOKEN=$(curl -s -X POST "$REALM/protocol/openid-connect/token" -d grant_type=password -d client_id=interview-copilot-spa -d scope="openid interview-copilot/user" \
+    --data-urlencode username="$EMAIL" --data-urlencode password="$PW2" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("access_token",""))')
+  [ -n "$OTHER_TOKEN" ] && break; sleep 1
+done
+FLOW=$(python3 scripts/suggestion_flow.py "$FRONTEND" "$TOKEN" "$OTHER_TOKEN" 2>&1); FLOW_RC=$?
+echo "$FLOW" | sed 's/^/      /'
+check "a user cannot read or write another user's session (404)" "[ $FLOW_RC = 0 ] && echo \"\$FLOW\" | grep -q 'other_user_get=404'"
+check "SSE stream stays open through both gateways and delivers a suggestion" "[ $FLOW_RC = 0 ] && echo \"\$FLOW\" | grep -q 'stream_status=200 content_type=text/event-stream'"
+check "the suggestion arrives within 2 seconds of the final line" \
+  "MS=\$(echo \"\$FLOW\" | sed -n 's/^first_suggestion_ms=//p'); [ -n \"\$MS\" ] && [ \"\$MS\" != none ] && [ \"\$MS\" -lt 2000 ]"
+check "Asked, an invalid status and another user's PATCH behave" "[ $FLOW_RC = 0 ] && echo \"\$FLOW\" | grep -q 'other_user_patch=404'"
 
 check "a transcript JSON can be written to the local S3 store" \
   "echo '{}' | docker compose exec -T -e AWS_ACCESS_KEY_ID=test -e AWS_SECRET_ACCESS_KEY=test -e AWS_DEFAULT_REGION=us-east-1 s3 aws --endpoint-url http://localhost:4566 s3 cp - s3://transcripts/smoke.json >/dev/null"

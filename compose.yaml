@@ -81,6 +81,21 @@ services:
       - "${MAILPIT_PORT:-8025}:8025"
     networks: [mail, mail-ui]
 
+  # Stand-in for the Anthropic API so the suggestion loop runs without a key or credit.
+  # Enable with COMPOSE_PROFILES=fake-llm and ANTHROPIC_BASE_URL=http://fake-llm:8080 in .env.
+  fake-llm:
+    profiles: ["fake-llm"]
+    image: python:3.13-alpine
+    command: ["python", "-u", "/app/server.py"]
+    volumes:
+      - ./fake-llm/server.py:/app/server.py:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8080), 2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [llm]
+
   backend:
     build:
       context: https://github.com/${GITHUB_OWNER:-Lesmol}/interview-copilot_backend.git#${BACKEND_REF:-main}
@@ -110,9 +125,10 @@ services:
       IDP_ADMIN_USERNAME: admin
       IDP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
       DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY:-}
     healthcheck: *spring-health
-    networks: [internal-backend, data, auth-backend, egress, mail]
+    networks: [internal-backend, data, auth-backend, egress, mail, llm]
 
   internal-gateway:
     build:
@@ -185,5 +201,6 @@ networks:
   auth-internal: { internal: true }
   auth-backend: { internal: true }
   egress: {}                          # backend only: outbound calls to the LLM
+  llm: { internal: true }             # backend <-> fake-llm (only used with the fake-llm profile)
   mail: { internal: true }            # backend <-> mailpit
   mail-ui: {}                         # mailpit only: lets the host open its web UI

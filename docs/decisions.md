@@ -10,3 +10,4 @@
 - **Realm tweaks for self-service accounts:** `loginWithEmailAllowed`, a 10-character password policy, and a user profile where the last name is optional (sign-up asks for one name).
 - **Local IdP admin:** the backend uses Keycloak's master admin for user management; see the backend decisions for why and what production should do.
 - **AssemblyAI skipped:** its key variable was removed.
+- **Stand-in model (`fake-llm`).** A 100-line Python server that speaks the Anthropic Messages wire format lets the suggestion loop, both gateways and the browser run without an API key or credit, and lets CI check SSE pass-through. Enable with `COMPOSE_PROFILES=fake-llm` and `ANTHROPIC_BASE_URL=http://fake-llm:8080`. It proves plumbing only; the 2-second target must still be measured against the real model.
